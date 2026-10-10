@@ -15,7 +15,7 @@ from domain.lattice import smallest_step, snap, snap_all
 from domain.profile import RouteProfile
 from domain.risk import assess
 from domain.sampling import checkpoint_distances, distance_shares
-from domain.scoring import ScoredCheckpoint, recommend, score_route
+from domain.scoring import ScoredCheckpoint, rank_routes, recommend, score_route
 from domain.weather import forecast_confidence, sample_at
 
 from ..models import TripPlan
@@ -23,6 +23,7 @@ from . import routing, weather
 from .timezones import tz_at
 
 TARE_LB = 35_000  # assumed empty tractor-trailer weight; TomTom needs gross weight
+MAX_GROSS_LB = 80_000  # US federal limit; heavier loads are routed as a legal-weight truck
 MAX_DEPARTURE_AHEAD = timedelta(days=7)
 PAST_GRACE = timedelta(minutes=15)
 CHECKPOINT_NODE_CAP = 300
@@ -145,7 +146,8 @@ def build_plan(req: PlanRequest, now: datetime | None = None) -> TripPlan:
     dep_epoch = departure.timestamp()
 
     options = routing.get_route_options(
-        req.origin.latlon, req.destination.latlon, departure, req.load_lb + TARE_LB
+        req.origin.latlon, req.destination.latlon, departure,
+        min(req.load_lb + TARE_LB, MAX_GROSS_LB),
     )
     interval_m = req.interval_mi * METERS_PER_MILE
     preps = [_prepare(LABELS[i], raw, interval_m, req.hos) for i, raw in enumerate(options.routes)]
@@ -211,7 +213,7 @@ def build_plan(req: PlanRequest, now: datetime | None = None) -> TripPlan:
         route_rows.append((prep, score, checkpoints))
 
     rec = recommend(scores)
-    ranks = {s.label: i + 1 for i, s in enumerate(sorted(scores, key=lambda s: s.key()))}
+    ranks = {s.label: i + 1 for i, s in enumerate(rank_routes(scores))}
 
     with transaction.atomic():
         plan = TripPlan.objects.create(

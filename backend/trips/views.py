@@ -28,12 +28,9 @@ class GeocodeView(APIView):
         return Response({"results": search_places(q)})
 
 
-class PlanListCreateView(APIView):
+class PlanCreateView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "plans"
-
-    def get_throttles(self):
-        return super().get_throttles() if self.request.method == "POST" else []
 
     def post(self, request):
         s = PlanRequestSerializer(data=request.data)
@@ -61,8 +58,11 @@ class PlanDetailView(APIView):
 class PlanHeatmapView(APIView):
     def get(self, request, plan_id):
         plan = get_object_or_404(TripPlan, pk=plan_id)
-        if plan.heatmap is None:
-            plan.heatmap = build_heatmap(plan)
+        if plan.heatmap is not None:
+            return Response(plan.heatmap)
+        heatmap = build_heatmap(plan)
+        if heatmap["complete"]:  # don't freeze gaps from a transient weather outage
+            plan.heatmap = heatmap
             plan.heatmap_computed_at = timezone.now()
             plan.save(update_fields=["heatmap", "heatmap_computed_at"])
-        return Response(plan.heatmap)
+        return Response(heatmap)

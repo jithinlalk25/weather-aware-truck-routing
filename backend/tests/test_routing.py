@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest
 
 from trips.services.routing import get_route_options
 
@@ -69,3 +70,28 @@ def test_picks_fastest_alternatives_that_are_distinct(monkeypatch):
     routing._pick_distinct(picked, [too_slow, distinct2, similar, distinct], max_ratio=1.4)
     # "similar" shares 81% with the fastest route; "too_slow" exceeds 1.4x.
     assert [r.source for r in picked] == ["fast", "distinct", "distinct2"]
+
+
+def test_tomtom_errors_are_translated(router):
+    from trips.services.errors import NoRouteFound
+
+    tomtom(router).mock(return_value=httpx.Response(400, json={"detailedError": {
+        "code": "MAP_MATCHING_FAILURE",
+        "message": "Engine error while executing route request: MAP_MATCHING_FAILURE: Origin",
+    }}))
+    with pytest.raises(NoRouteFound, match="not near a road a truck can use"):
+        get_route_options(CHICAGO, DENVER, DEPART, 70_000)
+
+
+def test_failed_via_request_does_not_fail_the_plan(router):
+    main = tomtom_route(arc(CHICAGO, DENVER))
+
+    def respond(request: httpx.Request):
+        if "circle(" in request.url.path:
+            return httpx.Response(429)
+        return httpx.Response(200, json=tomtom_payload(main))
+
+    tomtom(router).mock(side_effect=respond)
+    opts = get_route_options(CHICAGO, DENVER, DEPART, 70_000)
+    assert len(opts.routes) == 1
+    assert any("Only 1 distinct" in n for n in opts.notes)

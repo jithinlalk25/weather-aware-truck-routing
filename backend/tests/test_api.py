@@ -120,3 +120,24 @@ def test_upstream_rate_limit_is_reported(api):
         res = api.post("/api/plans", body(), format="json")
     assert res.status_code == 503
     assert "rate limit" in res.json()["detail"].lower()
+
+
+@pytest.mark.django_db
+def test_incomplete_heatmap_is_not_persisted(api, mocked, monkeypatch):
+    from trips.models import TripPlan
+    from trips.services import weather
+
+    plan_id = api.post("/api/plans", body(), format="json").json()["id"]
+    real = weather.get_series
+
+    def lose_one(nodes):
+        result = real(nodes)
+        lost = sorted(result.series)[0]
+        del result.series[lost]
+        result.unavailable.add(lost)
+        return result
+
+    monkeypatch.setattr(weather, "get_series", lose_one)
+    hm = api.get(f"/api/plans/{plan_id}/heatmap").json()
+    assert hm["complete"] is False
+    assert TripPlan.objects.get(pk=plan_id).heatmap is None  # retried on the next request

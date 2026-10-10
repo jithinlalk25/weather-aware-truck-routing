@@ -127,15 +127,6 @@ class PointIndex:
         return False
 
 
-def overlap_ratio(a: Sequence[LatLon], b: Sequence[LatLon], tolerance_m: float = 250.0,
-                  step_m: float = 1000.0) -> float:
-    """Share of route `a`'s length that lies within `tolerance_m` of route `b`."""
-    sample_a = resample(a, step_m)
-    index_b = PointIndex(resample(b, tolerance_m / 2))
-    hits = sum(1 for p in sample_a if index_b.near(p, tolerance_m))
-    return hits / len(sample_a)
-
-
 def offset_point(p: LatLon, bearing_deg: float, distance_m: float) -> LatLon:
     """Destination point from `p` along `bearing_deg` for `distance_m` (great circle)."""
     lat1, lon1 = math.radians(p[0]), math.radians(p[1])

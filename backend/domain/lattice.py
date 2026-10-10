@@ -34,10 +34,6 @@ class Node:
     def lon(self) -> float:
         return round(self.j * self.step, 4)
 
-    @property
-    def key(self) -> str:
-        return f"{self.step:g}:{self.i}:{self.j}"
-
 
 def snap(p: LatLon, step: float) -> Node:
     return Node(step, round(p[0] / step), round(p[1] / step))

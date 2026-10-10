@@ -1,11 +1,11 @@
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import type { RouteOption } from "@/api/types";
 import { formatLocal } from "@/lib/format";
 import { levelInfo, rgbCss } from "@/lib/risk";
 
-export function CheckpointList({ route }: { route: RouteOption }) {
+export const CheckpointList = memo(function CheckpointList({ route }: { route: RouteOption }) {
   const [open, setOpen] = useState(false);
   return (
     <section className="rounded-lg border">
@@ -51,4 +51,4 @@ export function CheckpointList({ route }: { route: RouteOption }) {
       )}
     </section>
   );
-}
+});

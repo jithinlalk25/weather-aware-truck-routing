@@ -80,9 +80,12 @@ def _fmt_mi(x: float) -> str:
 
 
 def _fmt_dur(seconds: float) -> str:
-    minutes = round(seconds / 60)
-    h, m = divmod(minutes, 60)
-    return f"{h}h {m:02d}m"
+    h, m = divmod(round(seconds / 60), 60)
+    return f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+def _fmt_avg(avg: float | None) -> str:
+    return "n/a" if avg is None else f"{avg:.2f}"
 
 
 _CRITERIA = (
@@ -123,8 +126,8 @@ def _why_not(best: RouteScore, other: RouteScore) -> str:
     if i == 3:
         mod = other.miles["moderate"]
         detail = f" ({_fmt_mi(mod)} Moderate)" if mod > 0 else ""
-        return (f"Higher average risk{detail}: {other.avg_risk:.2f} vs "
-                f"{best.avg_risk:.2f} on Route {best.label}.")
+        return (f"Higher average risk{detail}: {_fmt_avg(other.avg_risk)} vs "
+                f"{_fmt_avg(best.avg_risk)} on Route {best.label}.")
     return f"Same weather risk, but {_fmt_dur(other.total_s - best.total_s)} longer."
 
 
@@ -132,15 +135,14 @@ def recommend(scores: Sequence[RouteScore]) -> Recommendation:
     ranked = rank_routes(scores)
     best = ranked[0]
     warnings = []
-    if best.miles["no_travel"] > 0:
+    if best.key()[0] > 0:  # the best route has No-Travel miles, so every route does
         warnings.append(
             "Every route crosses No-Travel conditions at this departure time. "
             "Consider delaying departure."
         )
     if best.miles[NO_DATA_KEY] > 0:
         warnings.append(
-            f"{_fmt_mi(best.miles[NO_DATA_KEY])} of Route {best.label} has no forecast data "
-            "(beyond the forecast horizon)."
+            f"{_fmt_mi(best.miles[NO_DATA_KEY])} of Route {best.label} has no forecast data."
         )
     why_not = {s.label: _why_not(best, s) for s in ranked[1:]}
 
@@ -156,24 +158,27 @@ def recommend(scores: Sequence[RouteScore]) -> Recommendation:
         return Recommendation(best.label, f"Route {best.label} is the only route found.",
                               "only", tuple(warnings), why_not, tradeoff)
 
+    # Headlines compare the winner with the runner-up only, and say so: a third
+    # route may beat the winner on a later criterion after losing an earlier one.
     other = ranked[1]
     i = _first_difference(best, other)
     decided = _decided_by(i)
     if i is not None and i < len(_CRITERIA):
         key, name = _CRITERIA[i]
         headline = (
-            f"Route {best.label} has the fewest {name} miles: "
-            f"{_fmt_mi(best.miles[key])} vs {_fmt_mi(other.miles[key])} on Route {other.label}."
+            f"Route {best.label} has fewer {name} miles than the runner-up, Route {other.label}: "
+            f"{_fmt_mi(best.miles[key])} vs {_fmt_mi(other.miles[key])}."
         )
     elif decided == "avg_risk":
         headline = (
-            f"Severe and High mileage tie, so Route {best.label} wins on lower average risk: "
-            f"{best.avg_risk:.2f} vs {other.avg_risk:.2f} on Route {other.label}."
+            f"Severe and High miles tie with the runner-up, Route {other.label}, so Route "
+            f"{best.label} wins on lower average risk: {_fmt_avg(best.avg_risk)} vs "
+            f"{_fmt_avg(other.avg_risk)}."
         )
     elif decided == "time":
         headline = (
-            f"Weather risk is tied, so Route {best.label} wins as the faster trip: "
-            f"{_fmt_dur(best.total_s)} vs {_fmt_dur(other.total_s)} on Route {other.label}."
+            f"Weather risk ties with the runner-up, Route {other.label}, so Route {best.label} "
+            f"wins as the faster trip: {_fmt_dur(best.total_s)} vs {_fmt_dur(other.total_s)}."
         )
     else:
         headline = f"Routes tie on every criterion; Route {best.label} is listed first."

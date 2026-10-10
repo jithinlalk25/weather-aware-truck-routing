@@ -44,7 +44,7 @@ export interface RiskRun {
 
 /**
  * Split a route into runs of constant risk. Each checkpoint owns the road
- * between the midpoints to its neighbours (matching the backend's mileage), and
+ * between the midpoints to its neighbors (matching the backend's mileage), and
  * run boundaries are interpolated to the exact midpoint distance.
  */
 export function riskRuns(path: PathVertex[], checkpoints: Checkpoint[]): RiskRun[] {

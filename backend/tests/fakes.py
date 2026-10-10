@@ -44,8 +44,11 @@ def tomtom_payload(*routes):
 
 
 def open_meteo_responder(wind_fn=lambda lat, lon: 10.0, rain_fn=lambda lat, lon: 0.0,
-                         snow_fn=lambda lat, lon: 0.0):
-    """httpx side effect: hourly series whose values depend only on location."""
+                         snow_fn=lambda lat, lon: 0.0, rain_at=None):
+    """httpx side effect: hourly series that depend on location.
+
+    `rain_at(lat, lon, hour_epoch)`, if given, makes rain vary over time too.
+    """
     start = int(time.time() // 86400 * 86400)
     hours = 14 * 24
 
@@ -60,7 +63,8 @@ def open_meteo_responder(wind_fn=lambda lat, lon: 10.0, rain_fn=lambda lat, lon:
                 "time": [start + h * 3600 for h in range(hours)],
                 "wind_speed_10m": [w] * hours,
                 "wind_gusts_10m": [w * 1.4] * hours,
-                "rain": [r] * hours,
+                "rain": [rain_at(lat, lon, start + h * 3600) for h in range(hours)]
+                if rain_at else [r] * hours,
                 "showers": [0.0] * hours,
                 "snowfall": [s] * hours,
                 "temperature_2m": [50.0] * hours,

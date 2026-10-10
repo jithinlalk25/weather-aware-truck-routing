@@ -47,10 +47,10 @@ export const RAMPS: Record<"risk" | "wind" | "rain" | "snow", Ramp> = {
     stops: [
       { at: 0, rgb: [56, 189, 248], alpha: 0 },
       { at: 15, rgb: [56, 189, 248], alpha: 0.3 },
-      { at: 25, rgb: [34, 197, 94], alpha: 0.45 },
-      { at: 35, rgb: [234, 179, 8], alpha: 0.55 },
-      { at: 45, rgb: [239, 68, 68], alpha: 0.65 },
-      { at: 55, rgb: [126, 34, 206], alpha: 0.75 },
+      { at: 25, rgb: [234, 179, 8], alpha: 0.45 }, // Moderate
+      { at: 35, rgb: [249, 115, 22], alpha: 0.55 }, // High
+      { at: 45, rgb: [220, 38, 38], alpha: 0.65 }, // Severe
+      { at: 55, rgb: [126, 34, 206], alpha: 0.75 }, // No Travel
     ],
     ticks: [0, 25, 35, 45, 55].map((v) => ({ at: v, label: `${v}` })),
   },

@@ -20,6 +20,11 @@ if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY must be set when DEBUG is off")
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+if not DEBUG:
+    # Railway's healthcheck uses this Host header; also trust the app's public domain.
+    for host in ("healthcheck.railway.app", os.environ.get("RAILWAY_PUBLIC_DOMAIN")):
+        if host and host not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(host)
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
 INSTALLED_APPS = [
@@ -65,9 +70,11 @@ TEMPLATES = [
     },
 ]
 
+if not DEBUG and not os.environ.get("DATABASE_URL"):
+    raise RuntimeError("DATABASE_URL must be set when DEBUG is off")
 DATABASES = {
     "default": dj_database_url.config(
-        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}", conn_max_age=600
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}", conn_max_age=600, conn_health_checks=True
     )
 }
 
@@ -78,7 +85,9 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",
         "LOCATION": "api_cache",
         "TIMEOUT": 3600,
-        "OPTIONS": {"MAX_ENTRIES": 50_000},
+        # Bump when a cached dataclass changes shape, so stale pickles are ignored.
+        "KEY_PREFIX": "v1",
+        "OPTIONS": {"MAX_ENTRIES": 5_000},
     }
 }
 
@@ -103,7 +112,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_THROTTLE_RATES": {
-        "plans": os.environ.get("THROTTLE_PLANS", "30/hour"),
+        "plans": os.environ.get("THROTTLE_PLANS", "60/hour"),
         "geocode": os.environ.get("THROTTLE_GEOCODE", "60/min"),
     },
     "UNAUTHENTICATED_USER": None,

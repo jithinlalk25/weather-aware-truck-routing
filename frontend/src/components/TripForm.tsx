@@ -39,16 +39,23 @@ interface Props {
   /** When a plan is on screen, option toggles re-plan immediately. */
   autoApplyOptions: boolean;
   onSubmit: (req: PlanRequest) => void;
+  /** Called on the first edit after a failed submit, so stale server errors clear. */
+  onEdit: () => void;
 }
 
-export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit }: Props) {
-  const [v, setV] = useState<FormValues>(initial);
+export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit, onEdit }: Props) {
+  const [v, setValues] = useState<FormValues>(initial);
+  const setV = (update: (s: FormValues) => FormValues) => {
+    setValues(update);
+    if (error) onEdit();
+  };
   const [localErrors, setLocalErrors] = useState<Record<string, string>>({});
   const [now] = useState(() => Date.now());
 
   const tz = v.origin?.tz ?? browserTz;
   const min = toLocalInput(new Date(now), tz);
   const max = toLocalInput(new Date(now + 7 * 86400_000), tz);
+  const departureDate = new Date(v.departureLocal); // close enough to pick EST vs EDT
 
   // Until the user picks a time, keep "departure" at the next quarter hour in the origin's zone.
   const setOrigin = (origin: Place | null) =>
@@ -73,10 +80,13 @@ export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit }
     if (!s.departureLocal) errs.departure_local = "Choose a departure time.";
     setLocalErrors(errs);
     if (Object.keys(errs).length) return null;
+    // A departure that has slipped into the past (page left open, re-planning an
+    // older shared plan) leaves now.
+    const soon = toLocalInput(new Date(Date.now() + 60_000), s.origin!.tz ?? browserTz);
     return {
       origin: s.origin!,
       destination: s.destination!,
-      departure_local: s.departureLocal,
+      departure_local: s.departureLocal < soon ? soon : s.departureLocal,
       load_lb: Math.round(load),
       interval_mi: s.interval,
       wind_mode: s.windMode,
@@ -92,8 +102,8 @@ export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit }
 
   const setOption = (patch: Partial<FormValues>) => {
     const next = { ...v, ...patch };
-    setV(next);
-    if (autoApplyOptions && !pending) {
+    setV(() => next);
+    if (autoApplyOptions) {
       const req = build(next);
       if (req) onSubmit(req);
     }
@@ -103,7 +113,9 @@ export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit }
     error && !(error instanceof ApiError && Object.keys(error.fields).length) ? error.message : null;
 
   return (
-    <form onSubmit={submit} className="grid gap-4" noValidate>
+    <form onSubmit={submit} noValidate>
+      {/* Disabled while planning, so option toggles can't be lost mid-request. */}
+      <fieldset disabled={pending} className="grid min-w-0 gap-4">
       <div className="grid gap-3">
         <PlaceAutocomplete
           label="Origin"
@@ -166,10 +178,12 @@ export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit }
         )}
       </div>
 
-      <div className="grid grid-cols-[1fr_8.5rem] gap-3">
+      <div className="grid gap-3 sm:grid-cols-[1fr_8.5rem]">
         <div className="grid gap-1.5">
           <Label htmlFor="departure" className="text-xs text-muted-foreground">
-            {v.origin?.tz ? `Departure (${tzAbbrev(tz)}, origin time)` : "Departure (origin local time)"}
+            {v.origin?.tz && !Number.isNaN(departureDate.getTime())
+              ? `Departure (${tzAbbrev(tz, departureDate)}, origin time)`
+              : "Departure (origin local time)"}
           </Label>
           <Input
             id="departure"
@@ -211,6 +225,7 @@ export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit }
             variant="outline"
             size="sm"
             spacing={0}
+            aria-label="Weather checkpoint interval"
             value={String(v.interval)}
             onValueChange={(x) => x && setOption({ interval: Number(x) as Interval })}
           >
@@ -247,6 +262,7 @@ export function TripForm({ initial, pending, error, autoApplyOptions, onSubmit }
         {pending ? <Loader2 className="animate-spin" /> : <Route />}
         {pending ? "Planning routes…" : "Plan routes"}
       </Button>
+      </fieldset>
     </form>
   );
 }

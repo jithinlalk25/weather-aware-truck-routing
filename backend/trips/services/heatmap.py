@@ -49,7 +49,8 @@ def build_heatmap(plan: TripPlan) -> dict:
     routes = [r.path for r in plan.routes.all()]
     step, nodes = _choose_corridor(routes)
     nodes = sorted(nodes)
-    series = weather.get_series(nodes).series
+    forecast = weather.get_series(nodes)
+    series = forecast.series
 
     i0 = min(n.i for n in nodes)
     j0 = min(n.j for n in nodes)
@@ -88,4 +89,6 @@ def build_heatmap(plan: TripPlan) -> dict:
         "hours": HOURS + 1,
         "layers": layers,
         "generated_at": datetime.now(UTC).isoformat(),
+        # False when the weather service failed for some cells (they render as gaps).
+        "complete": not forecast.unavailable,
     }

@@ -17,8 +17,8 @@ function frameFor(hm: Heatmap, layer: HeatmapLayerKey, ramp: Ramp, hour: number)
 }
 
 /**
- * Canvas for the current slider position. Frames are tiny (one pixel per
- * lattice cell) and memoised, so scrubbing only swaps a texture.
+ * Canvas for the current slider position. Frames are small (UPSAMPLE x UPSAMPLE
+ * pixels per lattice cell) and memoized, so scrubbing only swaps a texture.
  */
 export function useHeatmapFrame(
   hm: Heatmap | undefined,

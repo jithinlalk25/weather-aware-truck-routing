@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import type { Plan } from "@/api/types";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -11,7 +13,7 @@ const ROWS = [
 ] as const;
 
 /** The recommendation criteria in priority order; the deciding row is highlighted. */
-export function ComparisonTable({ plan }: { plan: Plan }) {
+export const ComparisonTable = memo(function ComparisonTable({ plan }: { plan: Plan }) {
   const routes = [...plan.routes].sort((a, b) => a.rank - b.rank);
   const decided = plan.recommendation.decided_by;
   const value = (r: (typeof routes)[number], key: (typeof ROWS)[number]["key"]) => {
@@ -40,7 +42,7 @@ export function ComparisonTable({ plan }: { plan: Plan }) {
             {ROWS.map((row, i) => (
               <tr
                 key={row.key}
-                className={cn("border-t", decided === row.key && "bg-emerald-50 font-medium dark:bg-emerald-950/30")}
+                className={cn("border-t", decided === row.key && "bg-emerald-50 font-medium")}
               >
                 <td className="px-2 py-1.5">
                   {i + 1}. {row.label}
@@ -63,4 +65,4 @@ export function ComparisonTable({ plan }: { plan: Plan }) {
       </div>
     </section>
   );
-}
+});

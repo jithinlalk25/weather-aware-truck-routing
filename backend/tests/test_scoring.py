@@ -73,7 +73,7 @@ def test_explains_every_other_route_and_the_time_tradeoff():
     assert rec.label == "B"
     assert rec.decided_by == "time"  # versus the runner-up, C
     assert rec.why_not["A"].startswith("Higher average risk (10.0 mi Moderate)")
-    assert rec.why_not["C"] == "Same weather risk, but 0h 23m longer."
+    assert rec.why_not["C"] == "Same weather risk, but 23m longer."
     assert rec.tradeoff == (
         "Takes 2h 24m longer than the fastest option, Route A, to avoid its weather."
     )
@@ -85,3 +85,32 @@ def test_no_tradeoff_when_winner_is_fastest():
     rec = recommend([a, b])
     assert rec.tradeoff is None
     assert rec.why_not == {"B": "10.0 mi of High weather vs 0.0 mi on Route A."}
+
+
+def test_headline_compares_with_runner_up_only():
+    # C loses on Severe miles but has the fewest High miles of all three.
+    a = route("A", [L.HIGH, L.HIGH, L.LOW])
+    b = route("B", [L.HIGH, L.HIGH, L.HIGH])
+    c = route("C", [L.SEVERE, L.LOW, L.LOW])
+    rec = recommend([a, b, c])
+    assert rec.label == "A"
+    assert rec.headline == (
+        "Route A has fewer High miles than the runner-up, Route B: 20.0 mi vs 30.0 mi."
+    )
+    assert rec.why_not["C"] == "10.0 mi of Severe weather vs 0.0 mi on Route A."
+
+
+def test_route_without_any_forecast_does_not_crash():
+    a = route("A", [L.LOW, L.MODERATE], total_s=100)
+    c = route("C", [None, None], total_s=50)
+    rec = recommend([a, c])
+    assert rec.label == "A"
+    assert rec.why_not["C"] == "Higher average risk: n/a vs 0.50 on Route A."
+
+
+def test_no_travel_warning_matches_the_ranking_precision():
+    tiny = score_route("A", [ScoredCheckpoint(0.03 * MI, L.NO_TRAVEL),
+                             ScoredCheckpoint(10 * MI, L.LOW)], 10 * MI, 100, 100)
+    clean = route("B", [L.LOW], total_s=200)
+    rec = recommend([tiny, clean])
+    assert not any("Consider delaying" in w for w in rec.warnings)

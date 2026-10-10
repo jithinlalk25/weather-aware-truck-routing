@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Clock, Info } from "lucide-react";
+import { memo } from "react";
 
 import type { Plan, RouteOption } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -8,15 +9,15 @@ import { cn } from "@/lib/utils";
 
 import { RiskStrip } from "./RiskStrip";
 
-export function RecommendationCard({ plan }: { plan: Plan }) {
+export const RecommendationCard = memo(function RecommendationCard({ plan }: { plan: Plan }) {
   const rec = plan.recommendation;
-  const danger = rec.warnings.some((w) => w.includes("No-Travel"));
+  const danger = plan.routes.every((r) => r.miles_by_level.no_travel > 0);
   return (
     <section className="grid gap-2">
       <div
         className={cn(
           "rounded-lg border p-3",
-          danger ? "border-destructive/40 bg-destructive/5" : "border-emerald-600/30 bg-emerald-50 dark:bg-emerald-950/30",
+          danger ? "border-destructive/40 bg-destructive/5" : "border-emerald-600/30 bg-emerald-50",
         )}
       >
         <div className="flex items-center gap-2 text-sm font-semibold">
@@ -31,7 +32,7 @@ export function RecommendationCard({ plan }: { plan: Plan }) {
         {rec.tradeoff && <p className="mt-1 text-sm text-muted-foreground">{rec.tradeoff}</p>}
       </div>
       {rec.warnings.map((w) => (
-        <p key={w} className="flex gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+        <p key={w} className="flex gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           {w}
         </p>
@@ -44,7 +45,7 @@ export function RecommendationCard({ plan }: { plan: Plan }) {
       ))}
     </section>
   );
-}
+});
 
 interface CardsProps {
   plan: Plan;
@@ -52,7 +53,7 @@ interface CardsProps {
   onSelect: (label: string) => void;
 }
 
-export function RouteCards({ plan, selected, onSelect }: CardsProps) {
+export const RouteCards = memo(function RouteCards({ plan, selected, onSelect }: CardsProps) {
   return (
     <section className="grid gap-2" aria-label="Route options">
       {plan.routes.map((r) => (
@@ -68,7 +69,7 @@ export function RouteCards({ plan, selected, onSelect }: CardsProps) {
       ))}
     </section>
   );
-}
+});
 
 function RouteCard({
   route: r,
@@ -126,7 +127,7 @@ function RouteCard({
       </div>
       <div className="flex flex-wrap gap-1.5 text-xs">
         {riskyMiles.length === 0 && r.miles_by_level.no_data === 0 && (
-          <span className="text-emerald-700 dark:text-emerald-400">No High, Severe or No-Travel miles</span>
+          <span className="text-emerald-700">No High, Severe or No-Travel miles</span>
         )}
         {riskyMiles.map((l) => (
           <span key={l.key} className="inline-flex items-center gap-1">

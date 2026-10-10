@@ -11,7 +11,7 @@ A React + Django app that helps a truck driver pick the safest route. It generat
 - **Inputs:** origin and destination (US place search), departure time in the origin's local time, and load weight. Options: checkpoint interval (10 / 25 / 50 mi), conservative mode (classify on gusts), and Hours-of-Service stops.
 - **Three route options** from TomTom's truck routing, which accounts for vehicle weight, departure time and traffic.
   - The options are the fastest route plus the fastest alternatives that differ from those already picked by at least 30% of their length, and take at most 1.4× the fastest time.
-  - If TomTom's alternatives don't produce three such routes, extra options are forced through a point off each side of the main route.
+  - If that doesn't produce three routes, extra options are forced through a point off each side of the main route. In this fallback, forced and TomTom alternatives alike may take up to 1.6× the fastest time.
 - **Checkpoints** every N road miles. Each has an ETA (including HOS breaks and rests), weather, risk level, the factor that set the level, and a forecast-confidence label.
 - **Recommendation** with a one-sentence explanation, the extra time it costs compared with the fastest route (if any), a reason on every other route card, and a table of the criteria in priority order with the deciding row highlighted.
 - **Map** (MapLibre + deck.gl):
@@ -43,12 +43,12 @@ All of this lives in [`backend/domain/`](backend/domain), plain Python with no D
 - **Wind:** the rules use sustained 10 m wind by default. **Conservative mode** classifies on gusts instead.
 - **Rain** = Open-Meteo `rain + showers`. `precipitation` is not used because it also counts snow as water equivalent.
 - **Snow** = `snowfall`, which is snow depth per hour.
-- **Missing forecast data is not "Low".** Checkpoints beyond the forecast horizon are marked *No data*, excluded from the average, and their miles reported separately.
+- **Missing forecast data is not "Low".** Checkpoints without a forecast are marked *No data*, excluded from the average, and their miles reported separately. This happens beyond the forecast horizon, or for a cell where Open-Meteo still failed after retries.
 
 ### Sampling and ETAs
 
 - **Checkpoint placement.** Checkpoints sit at 0, N, 2N, … road miles plus the destination. Positions follow TomTom's road distance (its `progress` array), so mileage matches the route summary.
-- **Mileage per checkpoint.** Each checkpoint represents half the distance to each neighbour, so per-level miles add up exactly to the route length.
+- **Mileage per checkpoint.** Each checkpoint represents half the distance to each neighbor, so per-level miles add up exactly to the route length.
 - **ETA.**
   - Drive time comes from TomTom's traffic-aware cumulative travel time, interpolated between progress points.
   - With **HOS** on (FMCSA, property-carrying), there is a 30-minute break after 8 hours of driving and a 10-hour rest after 11 hours. A rest resets both clocks.
@@ -83,7 +83,7 @@ flowchart LR
 
 ```
 backend/
-  domain/            pure logic: risk, sampling, HOS, weather alignment, scoring, lattice, geo
+  domain/            pure logic: risk, sampling, route profile, HOS, weather alignment, scoring, lattice, geo
   trips/
     services/        routing (TomTom), geocode, weather (Open-Meteo), planner, heatmap
     models.py        TripPlan, RouteOption (immutable snapshots for shareable links)
@@ -92,19 +92,23 @@ backend/
 frontend/
   src/map/           MapView: MapLibre basemap + interleaved deck.gl layers
   src/components/    form, route cards, comparison table, forecast dock (slider/legend)
-  src/lib/           risk colours, timeline (truck position, risk runs), heatmap frames
+  src/lib/           risk colors, timeline (truck position, risk runs), heatmap frames
 ```
 
 **Weather lattice.**
 - Open-Meteo bills every location as one API call. Checkpoints and the heatmap are therefore snapped to a shared lat/lon lattice, and its spacing adapts so one plan needs at most ~300 locations for checkpoints and ~120 for the heatmap.
-- On very long trips at 10-mile intervals, adjacent checkpoints can share a forecast cell, but each still uses its own ETA.
+- On long trips at 10-mile intervals, adjacent checkpoints can share a forecast cell, but each still uses its own ETA. There, a shorter interval mostly adds more arrival times rather than finer weather.
+- **Provider hiccups.** A failed request (5xx, timeout) is retried after 1, 2 and 4 s, for at most 25 s.
+  - If up to 25% of the cells still fail, the plan is returned with those checkpoints as *No data* and a note.
+  - Otherwise the API answers 503 with a "try again in a minute" message.
+  - A heatmap with gaps is not saved, so the next view retries it.
 - Each cell's 14-day hourly series is cached for an hour and reused across plans.
 
 **Heatmap.** The corridor forecast is a grid, so it is drawn as an image rather than a point-density heatmap.
 - **Data:** the backend sends every corridor cell's values for T+0…48 h in one compact payload.
 - **Frames:** for each slider step the frontend builds a small image, interpolated between hours and upsampled with a mask-weighted bilinear filter so the corridor edges fade out.
 - **Rendering:** a deck.gl `BitmapLayer` shows the image, interleaved beneath the map labels.
-- **Cost:** frames are memoised, so scrubbing or playing only swaps a texture.
+- **Cost:** frames are memoized, so scrubbing or playing only swaps a texture.
 
 ## API
 
@@ -113,7 +117,8 @@ frontend/
 | GET | `/api/geocode?q=` | US place search (TomTom typeahead), returns label, lat/lon, time zone |
 | POST | `/api/plans` | Create a plan (see below) → full plan with routes and checkpoints |
 | GET | `/api/plans/:id` | A saved plan |
-| GET | `/api/plans/:id/heatmap` | Corridor grid, 49 hourly frames × {risk, wind, gust, rain, snow} |
+| GET | `/api/plans/:id/heatmap` | Corridor grid, 49 hourly frames × {risk, wind, gust, rain, snow}; `complete` is false if some cells failed |
+| GET | `/api/health` | Liveness check (used by Railway) |
 
 ```json
 POST /api/plans
@@ -165,14 +170,21 @@ uv run ruff check .
 cd frontend
 pnpm test
 pnpm typecheck
-pnpm exec oxlint src
+pnpm lint
 ```
 
 ## Deployment
 
-**Backend on Railway** (service root: `backend/`, plus a Postgres plugin):
-- [`railway.json`](backend/railway.json) runs migrations and `createcachetable` before deploy, then starts gunicorn.
-- Environment variables: `SECRET_KEY`, `DEBUG=0`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS` (the Vercel URL), `TOMTOM_API_KEY`. Railway provides `DATABASE_URL`.
+**Backend on Railway** (service root: `backend/`, plus a Postgres database):
+- [`railway.json`](backend/railway.json) runs migrations and `createcachetable` before deploy, then starts gunicorn. Its healthcheck hits `/api/health`.
+- Required variables:
+  - `SECRET_KEY`
+  - `DEBUG=0`
+  - `TOMTOM_API_KEY`
+  - `CORS_ALLOWED_ORIGINS`: the Vercel URL. Add `CORS_ALLOWED_ORIGIN_REGEXES` if Vercel preview URLs should work too.
+  - `DATABASE_URL=${{Postgres.DATABASE_URL}}`: a reference variable. The backend refuses to start without it when `DEBUG=0`.
+- `ALLOWED_HOSTS` automatically includes Railway's public domain and its healthcheck host. Add any custom domain yourself.
+- Optional: `THROTTLE_PLANS` (default `60/hour` per client), `THROTTLE_GEOCODE`, `LOG_LEVEL`, `OPEN_METEO_API_KEY`.
 
 **Frontend on Vercel** (root: `frontend/`):
 - Set `VITE_API_BASE_URL` to the Railway URL.
@@ -180,10 +192,13 @@ pnpm exec oxlint src
 
 ## Assumptions and limitations
 
-- **Tare weight.** The input is cargo weight, and the load rules use it. TomTom needs gross vehicle weight, so the app adds an assumed 35,000 lb tare. Loads that push gross weight past 80,000 lb are allowed but would need a permit.
+- **Tare weight.** The input is cargo weight, and the load rules use it. TomTom needs gross vehicle weight, so the app adds an assumed 35,000 lb tare. TomTom's gross weight is capped at the 80,000 lb federal limit; heavier loads would need a permit.
 - **Region and departure window.** US only. Departure must be within the next 7 days.
 - **Forecast confidence.** Labelled *high* under 48 h of lead time, *medium* under 120 h, and *low* after that. Beyond about 5 days, GFS turns 3-hourly and smooths peak rates.
 - **Free-tier quotas.**
-  - Open-Meteo: 600 calls/minute and 10,000/day, non-commercial. The lattice cap, caching and a shared per-minute budget keep plans within them. Setting `OPEN_METEO_API_KEY` switches to the commercial endpoint.
+  - Open-Meteo: 600 calls/minute and 10,000/day, non-commercial.
+    - The lattice cap and caching keep each plan small.
+    - A shared per-minute budget refuses requests with a clear message before the provider's limit is hit. The daily limit is not tracked.
+    - Setting `OPEN_METEO_API_KEY` switches to the commercial endpoint.
   - TomTom: monthly free allowances.
 - **Saved plans are snapshots.** "Refresh" re-plans with the latest forecast.

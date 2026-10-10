@@ -1,4 +1,4 @@
-from functools import lru_cache
+import threading
 
 from timezonefinder import TimezoneFinder
 
@@ -20,9 +20,14 @@ US_TIMEZONES = frozenset({
 })
 
 
-@lru_cache(maxsize=1)
+_local = threading.local()
+
+
 def _finder() -> TimezoneFinder:
-    return TimezoneFinder()
+    # TimezoneFinder instances must not be shared between threads (gunicorn gthread).
+    if not hasattr(_local, "finder"):
+        _local.finder = TimezoneFinder()
+    return _local.finder
 
 
 def tz_at(lat: float, lon: float) -> str:

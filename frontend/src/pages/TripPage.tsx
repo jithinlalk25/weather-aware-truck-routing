@@ -1,5 +1,5 @@
 import { CloudSun, Loader2, RefreshCw } from "lucide-react";
-import { lazy, type ReactNode, Suspense, useCallback, useMemo, useState } from "react";
+import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { ApiError } from "@/api/client";
@@ -46,6 +46,10 @@ export function TripPage() {
   );
   const notFound = planQuery.error instanceof ApiError && planQuery.error.status === 404;
 
+  // A failed submit's error belongs to the page it happened on.
+  const { reset } = create;
+  useEffect(() => reset(), [id, reset]);
+
   const form = useMemo(
     () => (plan ? valuesFromPlan(plan) : defaultValues()),
     [plan],
@@ -65,6 +69,13 @@ export function TripPage() {
           <Link to="/">Plan a new trip</Link>
         </Button>
       </div>
+    ) : planQuery.isError ? (
+      <div className="grid gap-2 text-sm">
+        <p className="text-destructive">Couldn't load this trip plan. {planQuery.error.message}</p>
+        <Button variant="outline" onClick={() => planQuery.refetch()}>
+          Retry
+        </Button>
+      </div>
     ) : (
       <TripForm
         key={plan?.id ?? "new"}
@@ -73,6 +84,7 @@ export function TripPage() {
         error={create.error}
         autoApplyOptions={!!plan}
         onSubmit={submit}
+        onEdit={reset}
       />
     );
 
@@ -141,7 +153,15 @@ function TripView({ plan, sidebarTop, planning, onRefresh }: ViewProps) {
               {route && <CheckpointList key={route.label} route={route} />}
               <footer className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span>
-                  Forecast fetched {new Date(plan.created_at).toLocaleString()} ·{" "}
+                  Forecast fetched{" "}
+                  {new Date(plan.created_at).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    timeZoneName: "short",
+                  })}{" "}
+                  ·{" "}
                   {plan.weather_meta.locations} forecast cells
                 </span>
                 <Button variant="ghost" size="xs" disabled={planning} onClick={onRefresh}>
@@ -167,6 +187,7 @@ function TripView({ plan, sidebarTop, planning, onRefresh }: ViewProps) {
         {plan && (
           <div className="pointer-events-none absolute inset-x-2 bottom-2 md:inset-x-auto md:right-4 md:bottom-6 md:left-4 lg:left-auto lg:w-[40rem]">
             <ForecastDock
+              key={plan.id}
               plan={plan}
               routeLabel={selected}
               hour={hour}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from urllib.parse import quote
 
 import httpx
@@ -18,7 +19,7 @@ CACHE_S = 24 * 3600
 
 def search_places(query: str, limit: int = 5) -> list[dict]:
     q = " ".join(query.split())[:120]
-    key = f"geo:{q.lower()}:{limit}"
+    key = "geo:" + hashlib.sha1(f"{q.lower()}|{limit}".encode()).hexdigest()
     cached = cache.get(key)
     if cached is not None:
         return cached

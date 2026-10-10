@@ -1,10 +1,9 @@
+/** "25h 36m" or "30m" (same style as the backend's explanations). */
 export function formatDuration(seconds: number): string {
   const minutes = Math.round(seconds / 60);
-  const d = Math.floor(minutes / 1440);
-  const h = Math.floor((minutes % 1440) / 60);
+  const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  if (d > 0) return `${d}d ${h}h ${String(m).padStart(2, "0")}m`;
-  return `${h}h ${String(m).padStart(2, "0")}m`;
+  return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
 }
 
 export const formatMiles = (mi: number, digits = 0) =>
@@ -61,5 +60,3 @@ export function tzAbbrev(tz: string, at = new Date()): string {
     .find((p) => p.type === "timeZoneName");
   return part?.value ?? tz;
 }
-
-export const formatLb = (lb: number) => `${lb.toLocaleString("en-US")} lb`;

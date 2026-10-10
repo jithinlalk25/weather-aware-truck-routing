@@ -45,7 +45,8 @@ export function ForecastDock(p: Props) {
     let last = performance.now();
     let acc = hourRef.current >= MAX_HOURS ? 0 : hourRef.current;
     const tick = (now: number) => {
-      acc = Math.min(MAX_HOURS, acc + ((now - last) / 1000) * PLAY_HOURS_PER_SECOND);
+      // The first rAF timestamp can precede `last`; never step backwards.
+      acc = Math.min(MAX_HOURS, acc + (Math.max(0, now - last) / 1000) * PLAY_HOURS_PER_SECOND);
       last = now;
       const snapped = Math.floor(acc / STEP) * STEP;
       if (snapped !== hourRef.current) onHour(snapped);
@@ -57,7 +58,10 @@ export function ForecastDock(p: Props) {
   }, [playing, onHour]);
 
   const start = Date.parse(p.plan.departure_at) / 1000;
-  const ramp = p.layer === "wind" && p.plan.wind_mode === "gust" ? { ...RAMPS.wind, label: "Wind gusts" } : RAMPS[p.layer];
+  const gusts = p.plan.wind_mode === "gust";
+  const ramp = RAMPS[p.layer];
+  const timeLabel = formatLocal(start + p.hour * 3600, p.plan.origin.tz);
+  const offsetLabel = `T+${Math.floor(p.hour)}h${p.hour % 1 ? ` ${String((p.hour % 1) * 60).padStart(2, "0")}m` : ""}`;
 
   return (
     <div className="pointer-events-auto grid gap-2.5 rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur">
@@ -73,10 +77,8 @@ export function ForecastDock(p: Props) {
         <div className="grid flex-1 gap-1">
           <div className="flex items-baseline justify-between gap-2 text-xs">
             <span className="font-medium tabular-nums">
-              T+{Math.floor(p.hour)}h{p.hour % 1 ? ` ${String((p.hour % 1) * 60).padStart(2, "0")}m` : ""}
-              <span className="ml-1.5 font-normal text-muted-foreground">
-                {formatLocal(start + p.hour * 3600, p.plan.origin.tz)}
-              </span>
+              {offsetLabel}
+              <span className="ml-1.5 font-normal text-muted-foreground">{timeLabel}</span>
             </span>
             {p.truck && p.routeLabel && (
               <span className="inline-flex items-center gap-1 text-muted-foreground">
@@ -86,7 +88,8 @@ export function ForecastDock(p: Props) {
             )}
           </div>
           <Slider
-            aria-label="Hours after departure"
+            thumbLabel="Forecast time after departure"
+            thumbValueText={`${offsetLabel}, ${timeLabel}`}
             min={0}
             max={MAX_HOURS}
             step={STEP}
@@ -119,10 +122,11 @@ export function ForecastDock(p: Props) {
           value={p.layer}
           onValueChange={(v) => v && p.onLayer(v as DockLayer)}
           disabled={!p.show}
+          aria-label="Heatmap layer"
         >
           {(Object.keys(RAMPS) as DockLayer[]).map((k) => (
             <ToggleGroupItem key={k} value={k} className="px-2.5 text-xs">
-              {RAMPS[k].label}
+              {k === "wind" && gusts ? "Gusts" : RAMPS[k].label}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -143,6 +147,22 @@ export function ForecastDock(p: Props) {
           )}
         </div>
       </div>
+      <MarkerKey />
+    </div>
+  );
+}
+
+function MarkerKey() {
+  const dot = (fill: string, stroke: string) => (
+    <span className="size-2.5 rounded-full border-2" style={{ background: fill, borderColor: stroke }} />
+  );
+  return (
+    <div className="hidden flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:flex">
+      <span className="inline-flex items-center gap-1">{dot("#2563eb", "#fff")} Truck at slider time</span>
+      <span className="inline-flex items-center gap-1">{dot("#475569", "#fff")} 10-h HOS rest</span>
+      <span className="inline-flex items-center gap-1">{dot("#fff", "#475569")} 30-min break</span>
+      <span className="inline-flex items-center gap-1">{dot("#fff", "#0f172a")} Origin</span>
+      <span className="inline-flex items-center gap-1">{dot("#0f172a", "#0f172a")} Destination</span>
     </div>
   );
 }

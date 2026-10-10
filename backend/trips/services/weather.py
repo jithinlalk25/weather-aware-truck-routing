@@ -45,6 +45,7 @@ WORKERS = 4
 CACHE_S = 3600
 MINUTE_BUDGET = 560  # stay under the free tier's 600 calls/minute
 RETRY_DELAYS_S = (1.0, 2.0, 4.0)  # Open-Meteo occasionally answers 503 "overloaded"
+RETRY_BUDGET_S = 25.0  # stop retrying a batch after this long, so requests stay bounded
 MAX_UNAVAILABLE_SHARE = 0.25  # tolerate a failed batch rather than failing the plan
 
 
@@ -105,34 +106,34 @@ def _fetch_batch(nodes: list[Node]) -> dict[Node, HourlySeries]:
     if settings.OPEN_METEO_API_KEY:
         url, params["apikey"] = COMMERCIAL_URL, settings.OPEN_METEO_API_KEY
 
+    deadline = time.monotonic() + RETRY_BUDGET_S
     for attempt, delay in enumerate((*RETRY_DELAYS_S, None)):
         try:
-            with client(timeout=30) as http:
+            with client(timeout=10) as http:
                 resp = http.get(url, params=params)
+            problem = f"HTTP {resp.status_code}" if resp.status_code >= 500 else None
         except httpx.HTTPError as exc:
-            if delay is None:
-                raise WeatherUnavailable() from exc
-            log.warning("Open-Meteo request failed (%s); retrying", type(exc).__name__)
-            time.sleep(delay)
-            continue
-        if resp.status_code == 429:
-            raise UpstreamRateLimited(
-                "The weather provider's rate limit was reached. Please retry in a minute."
-            )
-        if resp.status_code >= 500:
-            if delay is None:
-                raise WeatherUnavailable()
-            log.warning("Open-Meteo returned %s (attempt %d); retrying", resp.status_code,
-                        attempt + 1)
-            time.sleep(delay)
-            continue
-        if resp.status_code >= 400:
-            reason = resp.json().get("reason", "") if resp.content else ""
-            raise UpstreamError(f"Weather provider error ({resp.status_code}). {reason}".strip())
-        data = resp.json()
-        items = data if isinstance(data, list) else [data]
-        return {node: _parse(item) for node, item in zip(nodes, items, strict=True)}
-    raise WeatherUnavailable()
+            problem = type(exc).__name__
+        if problem is None:
+            break
+        if delay is None or time.monotonic() + delay > deadline:
+            raise WeatherUnavailable()
+        log.warning("Open-Meteo %s (attempt %d); retrying", problem, attempt + 1)
+        time.sleep(delay)
+
+    if resp.status_code == 429:
+        raise UpstreamRateLimited(
+            "The weather provider's rate limit was reached. Please retry in a minute."
+        )
+    if resp.status_code >= 400:
+        try:
+            reason = resp.json().get("reason", "")
+        except ValueError:
+            reason = ""
+        raise UpstreamError(f"Weather provider error ({resp.status_code}). {reason}".strip())
+    data = resp.json()
+    items = data if isinstance(data, list) else [data]
+    return {node: _parse(item) for node, item in zip(nodes, items, strict=True)}
 
 
 @dataclass

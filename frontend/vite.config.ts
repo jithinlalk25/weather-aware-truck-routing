@@ -13,16 +13,7 @@ export default defineConfig({
     proxy: { "/api": "http://127.0.0.1:8000" },
   },
   build: {
-    // maplibre-gl and deck.gl are large vendor chunks, loaded lazily with the map.
-    chunkSizeWarningLimit: 1200,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes("maplibre-gl")) return "maplibre";
-          if (id.includes("@deck.gl") || id.includes("@luma.gl") || id.includes("@math.gl"))
-            return "deckgl";
-        },
-      },
-    },
+    // maplibre-gl + deck.gl land in the lazily loaded MapView chunk (~480 KB gzip).
+    chunkSizeWarningLimit: 2000,
   },
 });

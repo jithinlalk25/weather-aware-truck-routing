@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from domain.geo import METERS_PER_MILE
 from domain.sampling import ALLOWED_INTERVALS_MI
 
 from .models import RouteOption, TripPlan
@@ -25,7 +26,6 @@ class PlanRequestSerializer(serializers.Serializer):
     departure_local = serializers.DateTimeField(
         input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S"],
         help_text="Wall-clock time at the origin, without offset (e.g. 2026-10-11T08:00).",
-        default_timezone=None,
     )
     load_lb = serializers.IntegerField(min_value=0, max_value=MAX_LOAD_LB)
     interval_mi = serializers.ChoiceField(choices=ALLOWED_INTERVALS_MI, default=25)
@@ -44,7 +44,7 @@ class RouteOptionSerializer(serializers.ModelSerializer):
         ]
 
     def get_distance_mi(self, obj: RouteOption) -> float:
-        return round(obj.distance_m / 1609.344, 1)
+        return round(obj.distance_m / METERS_PER_MILE, 1)
 
 
 class TripPlanSerializer(serializers.ModelSerializer):

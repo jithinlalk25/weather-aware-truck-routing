@@ -61,8 +61,6 @@ LOAD_SEVERE_LB = 40_000  # with High-band wind (35-44 mph), load > this -> Sever
 class _Scale:
     """One weather variable's banding."""
 
-    name: str
-    unit: str
     edges: tuple[float, float, float]
     no_travel: float
     no_travel_inclusive: bool
@@ -90,9 +88,9 @@ class _Scale:
         return level + min(max(frac, 0.0), 0.999)
 
 
-WIND = _Scale("wind", "mph", WIND_EDGES_MPH, WIND_NO_TRAVEL_MPH, no_travel_inclusive=True)
-RAIN = _Scale("rain", "in/hr", RAIN_EDGES_IN_HR, RAIN_NO_TRAVEL_IN_HR, no_travel_inclusive=False)
-SNOW = _Scale("snow", "in/hr", SNOW_EDGES_IN_HR, SNOW_NO_TRAVEL_IN_HR, no_travel_inclusive=False)
+WIND = _Scale(WIND_EDGES_MPH, WIND_NO_TRAVEL_MPH, no_travel_inclusive=True)
+RAIN = _Scale(RAIN_EDGES_IN_HR, RAIN_NO_TRAVEL_IN_HR, no_travel_inclusive=False)
+SNOW = _Scale(SNOW_EDGES_IN_HR, SNOW_NO_TRAVEL_IN_HR, no_travel_inclusive=False)
 
 
 def wind_level(mph: float) -> RiskLevel:

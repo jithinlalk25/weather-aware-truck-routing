@@ -6,7 +6,13 @@ import { MapLibreOverlay, type MapLibreOverlayProps } from "@deck.gl/maplibre";
 import { setWorkerUrl } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Map as MapGL, type MapRef, NavigationControl, useControl } from "react-map-gl/maplibre";
+import {
+  AttributionControl,
+  Map as MapGL,
+  type MapRef,
+  NavigationControl,
+  useControl,
+} from "react-map-gl/maplibre";
 
 import type { Checkpoint, Plan, RestStop, RouteOption } from "@/api/types";
 import { formatDuration, formatElapsed, formatLocal, formatMiles } from "@/lib/format";
@@ -143,8 +149,8 @@ function MapViewImpl({ plan, selected, onSelect, heatmap, truck }: Props) {
           id: "rest-stops",
           data: route.rest_stops,
           getPosition: (s) => [s.lon, s.lat],
-          getFillColor: (s) => (s.kind === "rest" ? [30, 64, 175] : [255, 255, 255]),
-          getLineColor: [30, 64, 175],
+          getFillColor: (s) => (s.kind === "rest" ? [71, 85, 105] : [255, 255, 255]),
+          getLineColor: (s) => (s.kind === "rest" ? [255, 255, 255] : [71, 85, 105]),
           getRadius: (s) => (s.kind === "rest" ? 7 : 5),
           radiusUnits: "pixels",
           lineWidthUnits: "pixels",
@@ -212,7 +218,13 @@ function MapViewImpl({ plan, selected, onSelect, heatmap, truck }: Props) {
     (info: PickingInfo) => {
       if (!info.object || !plan) return null;
       const picked = toPicked(info, selected);
-      return picked ? { html: tooltipHtml(picked, plan), style: TOOLTIP_STYLE } : null;
+      if (!picked) return null;
+      // deck.gl places tooltips right of the cursor; flip them near the right edge.
+      const flip = info.x > (info.viewport?.width ?? Infinity) - 300;
+      const style = flip
+        ? { ...TOOLTIP_STYLE, transform: `translate(${info.x - 292}px, ${info.y}px)` }
+        : TOOLTIP_STYLE;
+      return { html: tooltipHtml(picked, plan), style };
     },
     [plan, selected],
   );
@@ -223,11 +235,13 @@ function MapViewImpl({ plan, selected, onSelect, heatmap, truck }: Props) {
       initialViewState={INITIAL_VIEW}
       mapStyle={BASEMAP}
       onLoad={onLoad}
-      attributionControl={{ compact: true, customAttribution: ATTRIBUTION }}
+      attributionControl={false}
       style={{ position: "absolute", inset: 0 }}
       dragRotate={false}
     >
       <NavigationControl position="top-right" showCompass={false} />
+      {/* Top-left so it never sits under the forecast dock. */}
+      <AttributionControl position="top-left" compact customAttribution={ATTRIBUTION} />
       <DeckOverlay interleaved layers={layers} getTooltip={getTooltip} />
     </MapGL>
   );

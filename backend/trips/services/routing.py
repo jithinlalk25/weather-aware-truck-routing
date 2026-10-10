@@ -123,30 +123,53 @@ def _request(origin: LatLon, dest: LatLon, depart: datetime, gvw_lb: float,
     ]
     url = TOMTOM_ROUTE_URL.format(locations=":".join(stops))
     try:
-        with client(timeout=25) as http:
+        with client(timeout=20) as http:
             resp = http.get(url, params=params)
     except httpx.HTTPError as exc:
-        raise UpstreamError(f"TomTom routing request failed: {exc}") from exc
+        raise UpstreamError("The routing service (TomTom) did not respond. Please retry.") from exc
     if resp.status_code == 429:
         raise UpstreamRateLimited("TomTom rate limit reached. Please retry shortly.")
     if resp.status_code in (400, 404):
-        detail = _error_detail(resp)
-        if via is not None:
-            return []  # a forced via-point that can't be routed is simply skipped
-        raise NoRouteFound(detail or NoRouteFound.default_detail)
+        code, message = _error_detail(resp)
+        log.info("TomTom could not route (%s): %s", code, message)
+        raise NoRouteFound(_FRIENDLY_ROUTE_ERRORS.get(code, NoRouteFound.default_detail))
     if resp.status_code in (401, 403):
-        raise UpstreamError("TomTom rejected the API key.")
+        raise UpstreamError("TomTom rejected the request (invalid API key or quota used up).")
     if resp.status_code >= 400:
         raise UpstreamError(f"TomTom routing error ({resp.status_code}).")
     return _parse(resp.json(), "via" if via is not None else "tomtom")
 
 
-def _error_detail(resp: httpx.Response) -> str:
+_FRIENDLY_ROUTE_ERRORS = {
+    "NO_ROUTE_FOUND": "No truck route exists between these places.",
+    "MAP_MATCHING_FAILURE": (
+        "One of the places is not near a road a truck can use. Try a nearby city or address."
+    ),
+}
+
+
+def _error_detail(resp: httpx.Response) -> tuple[str, str]:
+    """(error code, raw message) from a TomTom error response."""
     try:
-        err = resp.json().get("detailedError") or resp.json().get("error") or {}
-        return err.get("message", "") if isinstance(err, dict) else str(err)
+        body = resp.json()
     except ValueError:
-        return ""
+        return "", ""
+    err = body.get("detailedError") or body.get("error") or {}
+    if not isinstance(err, dict):
+        return "", str(err)
+    message = err.get("message") or err.get("description") or ""
+    code = err.get("code") or next((c for c in _FRIENDLY_ROUTE_ERRORS if c in message), "")
+    return code, message
+
+
+def _request_via(origin: LatLon, dest: LatLon, depart: datetime, gvw_lb: float,
+                 via: LatLon) -> list[RawRoute]:
+    """A forced alternative is optional: any failure just means one option fewer."""
+    try:
+        return _request(origin, dest, depart, gvw_lb, via=via)
+    except (NoRouteFound, UpstreamError, UpstreamRateLimited) as exc:
+        log.info("Via-point route skipped: %s", exc)
+        return []
 
 
 def _pick_distinct(picked: list[RawRoute], pool: list[RawRoute], max_ratio: float) -> None:
@@ -208,10 +231,10 @@ def get_route_options(origin: LatLon, dest: LatLon, depart: datetime,
         vias = _via_candidates(picked[0], origin, dest)
         with ThreadPoolExecutor(max_workers=2) as pool:
             forced = [r for batch in pool.map(
-                lambda v: _request(origin, dest, depart, gvw_lb, via=v), vias) for r in batch]
-        before = len(picked)
-        _pick_distinct(picked, forced, MAX_TIME_RATIO_FORCED)
-        if len(picked) > before:
+                lambda v: _request_via(origin, dest, depart, gvw_lb, v), vias) for r in batch]
+        # TomTom's own alternatives get the same, looser time limit as forced ones.
+        _pick_distinct(picked, candidates[1:] + forced, MAX_TIME_RATIO_FORCED)
+        if any(r.source == "via" for r in picked):
             notes.append(
                 "TomTom returned fewer than 3 distinct routes, so extra options were generated "
                 "by routing through a point off each side of the main route."

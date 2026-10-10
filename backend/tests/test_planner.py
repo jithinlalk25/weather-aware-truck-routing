@@ -128,3 +128,31 @@ def test_unavailable_weather_cells_become_no_data(router, three_routes, monkeypa
     no_data = [c for r in plan.routes.all() for c in r.checkpoints if c["level"] is None]
     assert no_data and all(c["factor"].startswith("Weather service unavailable") for c in no_data)
     assert any("failed for 1 of" in n for n in plan.notes)
+
+
+@pytest.mark.django_db
+def test_weather_is_sampled_at_each_checkpoints_eta(router, three_routes):
+    """A storm arriving later in the trip only affects checkpoints reached after it,
+    and an HOS rest can delay a checkpoint into it."""
+    req = request(load_lb=20_000)
+    departure = req.departure_local.replace(tzinfo=ZoneInfo("America/Chicago")).timestamp()
+    storm_from = departure + 13.5 * 3600  # 0.3 in/hr everywhere = High
+    mock_providers(router, three_routes,
+                   rain_at=lambda lat, lon, t: 0.3 if t > storm_from else 0.0)
+
+    no_hos = build_plan(PlanRequest(**{**req.__dict__, "hos": False})).routes.get(label="A")
+    with_hos = build_plan(PlanRequest(**{**req.__dict__, "hos": True})).routes.get(label="A")
+
+    for cp in no_hos.checkpoints:
+        if cp["eta"] < storm_from - 3600:
+            assert cp["level"] == 0, cp
+        elif cp["eta"] > storm_from + 3600:
+            assert cp["level"] == 2, cp
+    # Checkpoints driven 11-12.4 h in: before the storm without HOS, but after the
+    # 10-hour rest they are reached ~22 h after departure, inside it.
+    shifted = [i for i, cp in enumerate(no_hos.checkpoints)
+               if 11 * 3600 < cp["elapsed_s"] < 12.4 * 3600]
+    assert shifted
+    for i in shifted:
+        assert no_hos.checkpoints[i]["level"] == 0
+        assert with_hos.checkpoints[i]["level"] == 2

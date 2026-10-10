@@ -18,6 +18,12 @@ interface Props {
 export function PlaceAutocomplete({ label, value, onChange, placeholder, error }: Props) {
   const [text, setText] = useState<string | null>(null); // null = show the selected place
   const [open, setOpen] = useState(false);
+  // A place set from outside (example chip, swap) replaces whatever was typed.
+  const [shownValue, setShownValue] = useState(value);
+  if (value !== shownValue) {
+    setShownValue(value);
+    if (value) setText(null);
+  }
   const query = text ?? "";
   const search = usePlaceSearch(query);
   const results = search.data ?? [];
