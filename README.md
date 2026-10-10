@@ -2,8 +2,8 @@
 
 A React + Django app that helps a truck driver pick the safest route. It generates three truck routes, samples the forecast at each checkpoint **for the time the truck will actually be there**, classifies risk with the assessment's wind/rain/snow and load rules, and recommends a route, balancing weather risk against travel time.
 
-- **Live app:** _TBD_
-- **API:** _TBD_
+- **Live app:** https://weather-aware-truck-routing-phi.vercel.app
+- **API:** https://backend-production-4052b.up.railway.app/api/health
 - **Walkthrough (Loom):** _TBD_
 
 ## Features
@@ -178,8 +178,9 @@ pnpm lint
 **Backend on Railway** (a service from this repo, plus a Postgres database). Railway no longer reads `railway.json` for new services, so these are set in the service settings:
 - Root directory `/backend`, builder Railpack (it detects `uv.lock` and Python 3.13 from `.python-version`). Watch path `/backend/**`.
 - Pre-deploy command: `python manage.py migrate --noinput && python manage.py createcachetable`
-- Start command: `python manage.py collectstatic --noinput && gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --access-logfile -`
+- Start command: `python manage.py collectstatic --noinput && gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 --access-logfile -`
 - Healthcheck path `/api/health`.
+- App sleeping is on for the backend and Postgres to keep costs low, so the first request after about 10 idle minutes takes a few extra seconds.
 - Required variables:
   - `SECRET_KEY`
   - `DEBUG=0`
