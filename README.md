@@ -2,7 +2,7 @@
 
 A React + Django app that helps a truck driver pick the safest route. It generates three truck routes, samples the forecast at each checkpoint **for the time the truck will actually be there**, classifies risk with the assessment's wind/rain/snow and load rules, and recommends a route, balancing weather risk against travel time.
 
-- **Live app:** https://weather-aware-truck-routing-phi.vercel.app
+- **Live app:** https://truck-weather.vercel.app
 - **API:** https://backend-production-4052b.up.railway.app/api/health
 - **Walkthrough (Loom):** _TBD_
 
