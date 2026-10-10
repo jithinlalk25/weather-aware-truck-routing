@@ -175,8 +175,11 @@ pnpm lint
 
 ## Deployment
 
-**Backend on Railway** (service root: `backend/`, plus a Postgres database):
-- [`railway.json`](backend/railway.json) runs migrations and `createcachetable` before deploy, then starts gunicorn. Its healthcheck hits `/api/health`.
+**Backend on Railway** (a service from this repo, plus a Postgres database). Railway no longer reads `railway.json` for new services, so these are set in the service settings:
+- Root directory `/backend`, builder Railpack (it detects `uv.lock` and Python 3.13 from `.python-version`). Watch path `/backend/**`.
+- Pre-deploy command: `python manage.py migrate --noinput && python manage.py createcachetable`
+- Start command: `python manage.py collectstatic --noinput && gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --access-logfile -`
+- Healthcheck path `/api/health`.
 - Required variables:
   - `SECRET_KEY`
   - `DEBUG=0`
