@@ -44,11 +44,13 @@ class RouteScore:
     miles: dict[str, float]
     avg_risk: float | None
 
-    def key(self) -> tuple[float, float, float, float, float]:
+    def key(self) -> tuple[float, float, float, float, float, float]:
         return (
             round(self.miles["no_travel"], 1),
             round(self.miles["severe"], 1),
             round(self.miles["high"], 1),
+            # The average skips unforecast miles, so they must not make a route look safer.
+            round(self.miles[NO_DATA_KEY], 1),
             round(self.avg_risk, 2) if self.avg_risk is not None else UNKNOWN_AVG,
             round(self.total_s),
         )
@@ -99,7 +101,7 @@ _CRITERIA = (
 class Recommendation:
     label: str
     headline: str
-    decided_by: str  # no_travel | severe | high | avg_risk | time | tie | only
+    decided_by: str  # no_travel | severe | high | no_data | avg_risk | time | tie | only
     warnings: tuple[str, ...]
     why_not: dict[str, str]  # other route label -> why it ranks below the winner
     tradeoff: str | None  # extra travel time accepted versus the fastest route
@@ -112,7 +114,7 @@ def _first_difference(a: RouteScore, b: RouteScore) -> int | None:
 def _decided_by(i: int | None) -> str:
     if i is None:
         return "tie"
-    return (*(key for key, _ in _CRITERIA), "avg_risk", "time")[i]
+    return (*(key for key, _ in _CRITERIA), NO_DATA_KEY, "avg_risk", "time")[i]
 
 
 def _why_not(best: RouteScore, other: RouteScore) -> str:
@@ -124,6 +126,9 @@ def _why_not(best: RouteScore, other: RouteScore) -> str:
         return (f"{_fmt_mi(other.miles[key])} of {name} weather vs "
                 f"{_fmt_mi(best.miles[key])} on Route {best.label}.")
     if i == 3:
+        return (f"{_fmt_mi(other.miles[NO_DATA_KEY])} without forecast data vs "
+                f"{_fmt_mi(best.miles[NO_DATA_KEY])} on Route {best.label}.")
+    if i == 4:
         mod = other.miles["moderate"]
         detail = f" ({_fmt_mi(mod)} Moderate)" if mod > 0 else ""
         return (f"Higher average risk{detail}: {_fmt_avg(other.avg_risk)} vs "
@@ -168,6 +173,12 @@ def recommend(scores: Sequence[RouteScore]) -> Recommendation:
         headline = (
             f"Route {best.label} has fewer {name} miles than the runner-up, Route {other.label}: "
             f"{_fmt_mi(best.miles[key])} vs {_fmt_mi(other.miles[key])}."
+        )
+    elif decided == NO_DATA_KEY:
+        headline = (
+            f"Severe and High miles tie with the runner-up, Route {other.label}, so Route "
+            f"{best.label} wins on fewer miles without forecast data: "
+            f"{_fmt_mi(best.miles[NO_DATA_KEY])} vs {_fmt_mi(other.miles[NO_DATA_KEY])}."
         )
     elif decided == "avg_risk":
         headline = (

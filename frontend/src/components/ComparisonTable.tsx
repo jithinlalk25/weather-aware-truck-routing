@@ -8,6 +8,7 @@ const ROWS = [
   { key: "no_travel", label: "No-Travel miles" },
   { key: "severe", label: "Severe miles" },
   { key: "high", label: "High miles" },
+  { key: "no_data", label: "Miles without forecast" },
   { key: "avg_risk", label: "Average risk (0–4)" },
   { key: "time", label: "Travel time" },
 ] as const;

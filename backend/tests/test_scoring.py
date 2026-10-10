@@ -105,7 +105,27 @@ def test_route_without_any_forecast_does_not_crash():
     c = route("C", [None, None], total_s=50)
     rec = recommend([a, c])
     assert rec.label == "A"
-    assert rec.why_not["C"] == "Higher average risk: n/a vs 0.50 on Route A."
+    assert rec.why_not["C"] == "20.0 mi without forecast data vs 0.0 mi on Route A."
+
+
+def test_missing_forecast_cannot_make_a_route_look_safer():
+    # Half of B is unforecast, so its average covers only its calm half.
+    complete = route("A", [L.MODERATE, L.LOW, L.LOW, L.LOW])
+    partial = route("B", [L.LOW, L.LOW, None, None])
+    rec = recommend([complete, partial])
+    assert partial.avg_risk < complete.avg_risk
+    assert rec.label == "A" and rec.decided_by == "no_data"
+    assert rec.headline == (
+        "Severe and High miles tie with the runner-up, Route B, so Route A wins on fewer "
+        "miles without forecast data: 0.0 mi vs 20.0 mi."
+    )
+
+
+def test_known_high_weather_still_outranks_missing_forecast():
+    high = route("A", [L.HIGH, L.LOW])
+    partial = route("B", [L.LOW, None])
+    rec = recommend([high, partial])
+    assert rec.label == "B" and rec.decided_by == "high"  # the criterion order is kept
 
 
 def test_no_travel_warning_matches_the_ranking_precision():

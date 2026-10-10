@@ -75,7 +75,7 @@ export interface Plan {
   recommendation: {
     label: string;
     headline: string;
-    decided_by: "no_travel" | "severe" | "high" | "avg_risk" | "time" | "tie" | "only";
+    decided_by: "no_travel" | "severe" | "high" | "no_data" | "avg_risk" | "time" | "tie" | "only";
     tradeoff: string | null;
     why_not: Record<string, string>;
     warnings: string[];

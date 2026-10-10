@@ -43,7 +43,7 @@ All of this lives in [`backend/domain/`](backend/domain), plain Python with no D
 - **Wind:** the rules use sustained 10 m wind by default. **Conservative mode** classifies on gusts instead.
 - **Rain** = Open-Meteo `rain + showers`. `precipitation` is not used because it also counts snow as water equivalent.
 - **Snow** = `snowfall`, which is snow depth per hour.
-- **Missing forecast data is not "Low".** Checkpoints without a forecast are marked *No data*, excluded from the average, and their miles reported separately. This happens beyond the forecast horizon, or for a cell where Open-Meteo still failed after retries.
+- **Missing forecast data is not "Low".** Checkpoints without a forecast are marked *No data*, excluded from the average, and their miles reported separately and ranked (see Recommendation). This happens beyond the forecast horizon, or for a cell where Open-Meteo still failed after retries.
 
 ### Sampling and ETAs
 
@@ -63,10 +63,12 @@ Routes are ranked by these criteria, in order:
 1. **fewest No-Travel miles** (added ahead of the brief's list, see below)
 2. fewest Severe miles
 3. fewest High miles
-4. lowest average risk (mile-weighted, Low = 0 … No Travel = 4)
-5. shortest travel time, including HOS pauses
+4. **fewest miles without forecast data** (added, see below)
+5. lowest average risk (mile-weighted, Low = 0 … No Travel = 4)
+6. shortest travel time, including HOS pauses
 
 - **Why No Travel comes first.** The brief's list starts at Severe. Ranking No Travel above it keeps a route that crosses a No-Travel cell from beating one that only crosses Severe weather.
+- **Why missing data is ranked.** The average skips miles without a forecast, so without this step a route whose forecast partly failed could look safer than one that is fully known. It comes after High miles, so known High weather still outranks unknown miles.
 - **When every route has No-Travel segments,** the UI says so and suggests delaying departure.
 - **Rounding before comparing.** Miles are compared at 0.1 mi and average risk at 0.01, so float noise can never decide the recommendation.
 
