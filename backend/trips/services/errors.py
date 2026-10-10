@@ -24,3 +24,12 @@ class NotConfigured(APIException):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     default_detail = "The server is missing an API key."
     default_code = "not_configured"
+
+
+class WeatherUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = (
+        "The weather service (Open-Meteo) is temporarily unavailable. "
+        "Please try again in a minute."
+    )
+    default_code = "weather_unavailable"

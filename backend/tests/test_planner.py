@@ -3,7 +3,6 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-import respx
 
 from domain.geo import METERS_PER_MILE
 from trips.models import TripPlan
@@ -11,8 +10,11 @@ from trips.services.planner import Place, PlanRequest, build_plan, resolve_depar
 
 from .fakes import CHICAGO, DENVER, arc, open_meteo_responder, tomtom_payload, tomtom_route
 
-TOMTOM = respx.route(host="api.tomtom.com", path__startswith="/routing/")
-OPEN_METEO = respx.route(host="api.open-meteo.com")
+
+def mock_providers(router, routes, **weather):
+    router.route(host="api.tomtom.com", path__startswith="/routing/").mock(
+        return_value=httpx.Response(200, json=routes))
+    router.route(host="api.open-meteo.com").mock(side_effect=open_meteo_responder(**weather))
 
 
 def request(**over):
@@ -40,12 +42,10 @@ def three_routes():
 
 
 @pytest.mark.django_db
-@respx.mock
-def test_plan_recommends_route_avoiding_wind(three_routes):
-    TOMTOM.mock(return_value=httpx.Response(200, json=three_routes))
+def test_plan_recommends_route_avoiding_wind(router, three_routes):
     # Severe-band wind (48 mph) north of 41.6N: with 42,000 lb that is No Travel.
-    OPEN_METEO.mock(side_effect=open_meteo_responder(
-        wind_fn=lambda lat, lon: 48.0 if lat > 41.6 and lon > -101 else 12.0))
+    mock_providers(router, three_routes,
+                   wind_fn=lambda lat, lon: 48.0 if lat > 41.6 and lon > -101 else 12.0)
 
     plan = build_plan(request())
     routes = {r.label: r for r in plan.routes.all()}
@@ -57,10 +57,8 @@ def test_plan_recommends_route_avoiding_wind(three_routes):
 
 
 @pytest.mark.django_db
-@respx.mock
-def test_checkpoints_cover_route_and_etas_increase(three_routes):
-    TOMTOM.mock(return_value=httpx.Response(200, json=three_routes))
-    OPEN_METEO.mock(side_effect=open_meteo_responder())
+def test_checkpoints_cover_route_and_etas_increase(router, three_routes):
+    mock_providers(router, three_routes)
 
     plan = build_plan(request(interval_mi=10))
     for route in plan.routes.all():
@@ -76,10 +74,8 @@ def test_checkpoints_cover_route_and_etas_increase(three_routes):
 
 
 @pytest.mark.django_db
-@respx.mock
-def test_hos_adds_pauses_and_shifts_arrival(three_routes):
-    TOMTOM.mock(return_value=httpx.Response(200, json=three_routes))
-    OPEN_METEO.mock(side_effect=open_meteo_responder())
+def test_hos_adds_pauses_and_shifts_arrival(router, three_routes):
+    mock_providers(router, three_routes)
 
     with_hos = build_plan(request(hos=True)).routes.get(label="A")
     without = build_plan(request(hos=False)).routes.get(label="A")
@@ -94,10 +90,8 @@ def test_hos_adds_pauses_and_shifts_arrival(three_routes):
 
 
 @pytest.mark.django_db
-@respx.mock
-def test_gust_mode_is_more_conservative(three_routes):
-    TOMTOM.mock(return_value=httpx.Response(200, json=three_routes))
-    OPEN_METEO.mock(side_effect=open_meteo_responder(wind_fn=lambda lat, lon: 22.0))
+def test_gust_mode_is_more_conservative(router, three_routes):
+    mock_providers(router, three_routes, wind_fn=lambda lat, lon: 22.0)
 
     sustained = build_plan(request(wind_mode="sustained")).routes.get(label="A")
     gust = build_plan(request(wind_mode=TripPlan.WindMode.GUST)).routes.get(label="A")
@@ -113,3 +107,24 @@ def test_departure_window():
         resolve_departure(datetime(2026, 10, 10, 6, 0), "America/Chicago", now)
     with pytest.raises(Exception, match="7 days"):
         resolve_departure(datetime(2026, 10, 18, 9, 0), "America/Chicago", now)
+
+
+@pytest.mark.django_db
+def test_unavailable_weather_cells_become_no_data(router, three_routes, monkeypatch):
+    from trips.services import weather
+
+    mock_providers(router, three_routes)
+    real_get_series = weather.get_series
+
+    def lose_one_cell(nodes):
+        result = real_get_series(nodes)
+        lost = sorted(result.series)[0]
+        del result.series[lost]
+        result.unavailable.add(lost)
+        return result
+
+    monkeypatch.setattr(weather, "get_series", lose_one_cell)
+    plan = build_plan(request())
+    no_data = [c for r in plan.routes.all() for c in r.checkpoints if c["level"] is None]
+    assert no_data and all(c["factor"].startswith("Weather service unavailable") for c in no_data)
+    assert any("failed for 1 of" in n for n in plan.notes)

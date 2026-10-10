@@ -123,4 +123,9 @@ LOGGING = {
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": os.environ.get("LOG_LEVEL", "INFO")},
+    # httpx logs full request URLs at INFO, and provider URLs carry API keys.
+    "loggers": {
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
+    },
 }

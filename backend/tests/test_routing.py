@@ -1,18 +1,19 @@
 from datetime import UTC, datetime, timedelta
 
 import httpx
-import respx
 
 from trips.services.routing import get_route_options
 
 from .fakes import CHICAGO, DENVER, arc, tomtom_payload, tomtom_route
 
 DEPART = datetime.now(UTC) + timedelta(hours=1)
-TOMTOM = respx.route(host="api.tomtom.com", path__startswith="/routing/")
 
 
-@respx.mock
-def test_drops_near_duplicates_and_slow_alternatives():
+def tomtom(router):
+    return router.route(host="api.tomtom.com", path__startswith="/routing/")
+
+
+def test_drops_near_duplicates_and_slow_alternatives(router):
     main = tomtom_route(arc(CHICAGO, DENVER))
     dup = tomtom_route(arc(CHICAGO, DENVER, bulge_deg=0.001), speed=24.9)
     slow = tomtom_route(arc(CHICAGO, DENVER, bulge_deg=2.0), speed=12)  # >1.4x slower
@@ -23,15 +24,14 @@ def test_drops_near_duplicates_and_slow_alternatives():
             return httpx.Response(400, json={"detailedError": {"message": "NO_ROUTE_FOUND"}})
         return httpx.Response(200, json=tomtom_payload(main, dup, slow, ok))
 
-    TOMTOM.mock(side_effect=respond)
+    tomtom(router).mock(side_effect=respond)
     opts = get_route_options(CHICAGO, DENVER, DEPART, 70_000)
     lengths = [r.length_m for r in opts.routes]
     assert lengths == [main["summary"]["lengthInMeters"], ok["summary"]["lengthInMeters"]]
     assert any("Only 2 distinct" in n for n in opts.notes)
 
 
-@respx.mock
-def test_forces_alternatives_through_via_points_when_needed():
+def test_forces_alternatives_through_via_points_when_needed(router):
     main = tomtom_route(arc(CHICAGO, DENVER))
     north = tomtom_route(arc(CHICAGO, DENVER, bulge_deg=0.9), speed=24)
     south = tomtom_route(arc(CHICAGO, DENVER, bulge_deg=-0.9), speed=24)
@@ -43,7 +43,7 @@ def test_forces_alternatives_through_via_points_when_needed():
         lat = float(path.split("circle(")[1].split(",")[0])
         return httpx.Response(200, json=tomtom_payload(north if lat > 41 else south))
 
-    TOMTOM.mock(side_effect=respond)
+    tomtom(router).mock(side_effect=respond)
     opts = get_route_options(CHICAGO, DENVER, DEPART, 70_000)
     assert len(opts.routes) == 3
     assert [r.source for r in opts.routes] == ["tomtom", "via", "via"]

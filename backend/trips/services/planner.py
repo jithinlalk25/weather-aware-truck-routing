@@ -128,6 +128,15 @@ def _rest_stops(prep: _RoutePrep) -> list[dict]:
     return stops
 
 
+def _unavailable_note(forecast: weather.SeriesResult, total: int) -> list[str]:
+    if not forecast.unavailable:
+        return []
+    return [
+        f"The weather service failed for {len(forecast.unavailable)} of {total} forecast cells "
+        "after retries; those checkpoints show No data. Refresh to try again."
+    ]
+
+
 def build_plan(req: PlanRequest, now: datetime | None = None) -> TripPlan:
     if haversine_m(req.origin.latlon, req.destination.latlon) < 1000:
         raise ValidationError({"destination": "Origin and destination are the same place."})
@@ -144,7 +153,8 @@ def build_plan(req: PlanRequest, now: datetime | None = None) -> TripPlan:
     # One lattice for all checkpoints, as fine as the per-plan location budget allows.
     all_points = [p for prep in preps for p in prep.cp_points]
     step = smallest_step(lambda s: len(snap_all(all_points, s)), CHECKPOINT_NODE_CAP)
-    series = weather.get_series(snap_all(all_points, step))
+    nodes = snap_all(all_points, step)
+    forecast = weather.get_series(nodes)
 
     gust_mode = req.wind_mode == TripPlan.WindMode.GUST
     now_epoch = (now or datetime.now(UTC)).timestamp()
@@ -156,7 +166,8 @@ def build_plan(req: PlanRequest, now: datetime | None = None) -> TripPlan:
         ):
             eta = dep_epoch + elapsed
             node = snap(pt, step)
-            ws = sample_at(series[node], eta)
+            node_series = forecast.series.get(node)
+            ws = sample_at(node_series, eta) if node_series else None
             lead_h = (eta - now_epoch) / 3600
             cp = {
                 "i": i,
@@ -171,7 +182,9 @@ def build_plan(req: PlanRequest, now: datetime | None = None) -> TripPlan:
                 "cell": [node.lat, node.lon],
             }
             if ws is None:
-                cp.update(level=None, factor="No forecast data for this time")
+                reason = ("Weather service unavailable for this cell" if node_series is None
+                          else "No forecast data for this time")
+                cp.update(level=None, factor=reason)
                 scored.append(ScoredCheckpoint(share, None))
             else:
                 wind_for_rules = ws.gust_mph if gust_mode else ws.wind_mph
@@ -221,11 +234,11 @@ def build_plan(req: PlanRequest, now: datetime | None = None) -> TripPlan:
             tradeoff=rec.tradeoff or "",
             why_not=rec.why_not,
             warnings=list(rec.warnings),
-            notes=options.notes,
+            notes=options.notes + _unavailable_note(forecast, len(nodes)),
             weather_meta={
                 "source": "Open-Meteo (best-match models)",
                 "lattice_step_deg": step,
-                "locations": len({snap(p, step) for p in all_points}),
+                "locations": len(nodes),
                 "tare_lb": TARE_LB,
             },
         )

@@ -13,15 +13,17 @@ import logging
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 
 import httpx
 from django.conf import settings
 from django.core.cache import cache
+from rest_framework.exceptions import APIException
 
 from domain.lattice import Node
 from domain.weather import HourlySeries
 
-from .errors import UpstreamError, UpstreamRateLimited
+from .errors import UpstreamError, UpstreamRateLimited, WeatherUnavailable
 from .http import client
 
 log = logging.getLogger(__name__)
@@ -42,6 +44,8 @@ BATCH_SIZE = 50
 WORKERS = 4
 CACHE_S = 3600
 MINUTE_BUDGET = 560  # stay under the free tier's 600 calls/minute
+RETRY_DELAYS_S = (1.0, 2.0, 4.0)  # Open-Meteo occasionally answers 503 "overloaded"
+MAX_UNAVAILABLE_SHARE = 0.25  # tolerate a failed batch rather than failing the plan
 
 
 def _cache_key(node: Node) -> str:
@@ -101,20 +105,26 @@ def _fetch_batch(nodes: list[Node]) -> dict[Node, HourlySeries]:
     if settings.OPEN_METEO_API_KEY:
         url, params["apikey"] = COMMERCIAL_URL, settings.OPEN_METEO_API_KEY
 
-    for attempt in range(2):
+    for attempt, delay in enumerate((*RETRY_DELAYS_S, None)):
         try:
             with client(timeout=30) as http:
                 resp = http.get(url, params=params)
         except httpx.HTTPError as exc:
-            if attempt == 0:
-                continue
-            raise UpstreamError(f"Weather request failed: {exc}") from exc
+            if delay is None:
+                raise WeatherUnavailable() from exc
+            log.warning("Open-Meteo request failed (%s); retrying", type(exc).__name__)
+            time.sleep(delay)
+            continue
         if resp.status_code == 429:
             raise UpstreamRateLimited(
                 "The weather provider's rate limit was reached. Please retry in a minute."
             )
-        if resp.status_code >= 500 and attempt == 0:
-            time.sleep(1.0)
+        if resp.status_code >= 500:
+            if delay is None:
+                raise WeatherUnavailable()
+            log.warning("Open-Meteo returned %s (attempt %d); retrying", resp.status_code,
+                        attempt + 1)
+            time.sleep(delay)
             continue
         if resp.status_code >= 400:
             reason = resp.json().get("reason", "") if resp.content else ""
@@ -122,24 +132,51 @@ def _fetch_batch(nodes: list[Node]) -> dict[Node, HourlySeries]:
         data = resp.json()
         items = data if isinstance(data, list) else [data]
         return {node: _parse(item) for node, item in zip(nodes, items, strict=True)}
-    raise UpstreamError("Weather provider unavailable.")
+    raise WeatherUnavailable()
 
 
-def get_series(nodes: Iterable[Node]) -> dict[Node, HourlySeries]:
-    """Hourly series for every node (from cache where possible)."""
+@dataclass
+class SeriesResult:
+    series: dict[Node, HourlySeries]
+    unavailable: set[Node] = field(default_factory=set)  # provider failed for these
+
+
+def get_series(nodes: Iterable[Node]) -> SeriesResult:
+    """Hourly series for every node, from cache where possible.
+
+    If a few batches still fail after retries, the rest of the plan is usable:
+    those nodes are reported as unavailable (their checkpoints show "No data").
+    Only when more than MAX_UNAVAILABLE_SHARE of the nodes are missing does the
+    request fail.
+    """
     nodes = sorted(set(nodes))
     keys = {_cache_key(n): n for n in nodes}
     found = cache.get_many(list(keys))
-    result = {keys[k]: v for k, v in found.items()}
-    missing = [n for n in nodes if n not in result]
+    result = SeriesResult({keys[k]: v for k, v in found.items()})
+    missing = [n for n in nodes if n not in result.series]
     if not missing:
         return result
 
     _take_budget(len(missing))
     batches = [missing[i:i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
     log.info("Open-Meteo: fetching %d nodes in %d batches", len(missing), len(batches))
+    errors: list[APIException] = []
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        for fetched in pool.map(_fetch_batch, batches):
-            result.update(fetched)
+        futures = {pool.submit(_fetch_batch, batch): batch for batch in batches}
+        for future, batch in futures.items():
+            try:
+                fetched = future.result()
+            except UpstreamRateLimited:
+                raise
+            except (UpstreamError, WeatherUnavailable) as exc:
+                errors.append(exc)
+                result.unavailable.update(batch)
+                continue
+            result.series.update(fetched)
             cache.set_many({_cache_key(n): s for n, s in fetched.items()}, CACHE_S)
+
+    if errors and len(result.unavailable) > MAX_UNAVAILABLE_SHARE * len(nodes):
+        raise errors[0]
+    if errors:
+        log.warning("Open-Meteo: %d of %d nodes unavailable", len(result.unavailable), len(nodes))
     return result

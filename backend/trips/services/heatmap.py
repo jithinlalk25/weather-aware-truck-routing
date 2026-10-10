@@ -49,7 +49,7 @@ def build_heatmap(plan: TripPlan) -> dict:
     routes = [r.path for r in plan.routes.all()]
     step, nodes = _choose_corridor(routes)
     nodes = sorted(nodes)
-    series = weather.get_series(nodes)
+    series = weather.get_series(nodes).series
 
     i0 = min(n.i for n in nodes)
     j0 = min(n.j for n in nodes)
@@ -64,7 +64,7 @@ def build_heatmap(plan: TripPlan) -> dict:
     for h in range(HOURS + 1):
         t = start + h * 3600
         for n in nodes:
-            ws = sample_at(series[n], t)
+            ws = sample_at(series[n], t) if n in series else None
             if ws is None:
                 for values in layers.values():
                     values.append(None)
