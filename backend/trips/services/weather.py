@@ -40,7 +40,7 @@ HOURLY_VARS = (
     "weather_code",
 )
 FORECAST_DAYS = 14
-BATCH_SIZE = 50
+BATCH_SIZE = 20  # ~300 KB per response; big responses are likelier to stall mid-transfer
 WORKERS = 4
 CACHE_S = 3600
 MINUTE_BUDGET = 560  # stay under the free tier's 600 calls/minute
@@ -112,8 +112,12 @@ def _fetch_batch(nodes: list[Node]) -> dict[Node, HourlySeries]:
             with client(timeout=10) as http:
                 resp = http.get(url, params=params)
             problem = f"HTTP {resp.status_code}" if resp.status_code >= 500 else None
+            if resp.status_code < 400:
+                data = resp.json()
         except httpx.HTTPError as exc:
             problem = type(exc).__name__
+        except ValueError:  # body cut off mid-transfer
+            problem = "truncated response"
         if problem is None:
             break
         if delay is None or time.monotonic() + delay > deadline:
@@ -131,7 +135,6 @@ def _fetch_batch(nodes: list[Node]) -> dict[Node, HourlySeries]:
         except ValueError:
             reason = ""
         raise UpstreamError(f"Weather provider error ({resp.status_code}). {reason}".strip())
-    data = resp.json()
     items = data if isinstance(data, list) else [data]
     return {node: _parse(item) for node, item in zip(nodes, items, strict=True)}
 

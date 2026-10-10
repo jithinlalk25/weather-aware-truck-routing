@@ -7,7 +7,7 @@ from trips.services.errors import UpstreamRateLimited, WeatherUnavailable
 
 from .fakes import open_meteo_responder
 
-NODES = [Node(0.1, 400 + i, -900) for i in range(120)]  # 3 batches of 50/50/20
+NODES = [Node(0.1, 400 + i, -900) for i in range(120)]  # 6 batches of 20
 
 
 @pytest.fixture(autouse=True)
@@ -28,11 +28,24 @@ def test_retries_transient_503(router):
     assert route.call_count == 2
 
 
+def test_retries_truncated_body(router):
+    ok = open_meteo_responder()
+    calls = iter([httpx.Response(200, content=b'[{"latitude": 40.0, "hourly": {"time": [1, 2')])
+
+    def respond(request):
+        return next(calls, None) or ok(request)
+
+    route = router.get(host="api.open-meteo.com").mock(side_effect=respond)
+    result = weather.get_series(NODES[:10])
+    assert len(result.series) == 10 and not result.unavailable
+    assert route.call_count == 2
+
+
 def test_a_failing_batch_degrades_to_no_data(router):
     ok = open_meteo_responder()
 
     def respond(request):
-        if request.url.params["latitude"].startswith("50,"):  # third batch: 50.0..51.9 N
+        if request.url.params["latitude"].startswith("50,"):  # last batch: 50.0..51.9 N
             return httpx.Response(503)
         return ok(request)
 
