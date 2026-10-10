@@ -1,0 +1,145 @@
+"""Open-Meteo hourly forecasts for lattice nodes, cached and rate-budgeted.
+
+Open-Meteo bills every location in a request as one call (free tier: 600/min,
+5,000/h, 10,000/day). We request at most 7 variables and 14 days so each
+location costs exactly one call, cache each node's series for an hour, and keep
+a shared per-minute budget so a burst of plans fails fast with a clear message
+instead of tripping the provider's limit.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
+
+import httpx
+from django.conf import settings
+from django.core.cache import cache
+
+from domain.lattice import Node
+from domain.weather import HourlySeries
+
+from .errors import UpstreamError, UpstreamRateLimited
+from .http import client
+
+log = logging.getLogger(__name__)
+
+FREE_URL = "https://api.open-meteo.com/v1/forecast"
+COMMERCIAL_URL = "https://customer-api.open-meteo.com/v1/forecast"
+HOURLY_VARS = (
+    "wind_speed_10m",
+    "wind_gusts_10m",
+    "rain",
+    "showers",
+    "snowfall",
+    "temperature_2m",
+    "weather_code",
+)
+FORECAST_DAYS = 14
+BATCH_SIZE = 50
+WORKERS = 4
+CACHE_S = 3600
+MINUTE_BUDGET = 560  # stay under the free tier's 600 calls/minute
+
+
+def _cache_key(node: Node) -> str:
+    # Keyed by coordinates (not lattice step) so coarser heatmap lattices reuse
+    # checkpoint forecasts wherever the grids coincide.
+    return f"om:{node.lat:.4f}:{node.lon:.4f}"
+
+
+def _take_budget(calls: int) -> None:
+    if settings.OPEN_METEO_API_KEY:
+        return
+    bucket = f"om-budget:{int(time.time() // 60)}"
+    cache.add(bucket, 0, 120)
+    try:
+        used = cache.incr(bucket, calls)
+    except ValueError:  # the key expired between add() and incr()
+        cache.set(bucket, calls, 120)
+        used = calls
+    if used > MINUTE_BUDGET:
+        cache.decr(bucket, calls)
+        raise UpstreamRateLimited(
+            "The free weather API's per-minute limit is in use. Please retry in a minute."
+        )
+
+
+def _merge_rain(rain: list, showers: list | None) -> list[float | None]:
+    showers = showers or [None] * len(rain)
+    return [None if r is None else r + (s or 0.0) for r, s in zip(rain, showers, strict=True)]
+
+
+def _parse(item: dict) -> HourlySeries:
+    h = item["hourly"]
+    return HourlySeries(
+        start_epoch=int(h["time"][0]),
+        wind_mph=h["wind_speed_10m"],
+        gust_mph=h["wind_gusts_10m"],
+        rain_in=_merge_rain(h["rain"], h.get("showers")),
+        snow_in=h["snowfall"],
+        temp_f=h.get("temperature_2m") or [None] * len(h["time"]),
+        weather_code=h.get("weather_code") or [None] * len(h["time"]),
+    )
+
+
+def _fetch_batch(nodes: list[Node]) -> dict[Node, HourlySeries]:
+    params = {
+        "latitude": ",".join(f"{n.lat:g}" for n in nodes),
+        "longitude": ",".join(f"{n.lon:g}" for n in nodes),
+        "hourly": ",".join(HOURLY_VARS),
+        "wind_speed_unit": "mph",
+        "precipitation_unit": "inch",
+        "temperature_unit": "fahrenheit",
+        "timezone": "GMT",
+        "timeformat": "unixtime",
+        "forecast_days": FORECAST_DAYS,
+    }
+    url = FREE_URL
+    if settings.OPEN_METEO_API_KEY:
+        url, params["apikey"] = COMMERCIAL_URL, settings.OPEN_METEO_API_KEY
+
+    for attempt in range(2):
+        try:
+            with client(timeout=30) as http:
+                resp = http.get(url, params=params)
+        except httpx.HTTPError as exc:
+            if attempt == 0:
+                continue
+            raise UpstreamError(f"Weather request failed: {exc}") from exc
+        if resp.status_code == 429:
+            raise UpstreamRateLimited(
+                "The weather provider's rate limit was reached. Please retry in a minute."
+            )
+        if resp.status_code >= 500 and attempt == 0:
+            time.sleep(1.0)
+            continue
+        if resp.status_code >= 400:
+            reason = resp.json().get("reason", "") if resp.content else ""
+            raise UpstreamError(f"Weather provider error ({resp.status_code}). {reason}".strip())
+        data = resp.json()
+        items = data if isinstance(data, list) else [data]
+        return {node: _parse(item) for node, item in zip(nodes, items, strict=True)}
+    raise UpstreamError("Weather provider unavailable.")
+
+
+def get_series(nodes: Iterable[Node]) -> dict[Node, HourlySeries]:
+    """Hourly series for every node (from cache where possible)."""
+    nodes = sorted(set(nodes))
+    keys = {_cache_key(n): n for n in nodes}
+    found = cache.get_many(list(keys))
+    result = {keys[k]: v for k, v in found.items()}
+    missing = [n for n in nodes if n not in result]
+    if not missing:
+        return result
+
+    _take_budget(len(missing))
+    batches = [missing[i:i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
+    log.info("Open-Meteo: fetching %d nodes in %d batches", len(missing), len(batches))
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for fetched in pool.map(_fetch_batch, batches):
+            result.update(fetched)
+            cache.set_many({_cache_key(n): s for n, s in fetched.items()}, CACHE_S)
+    return result

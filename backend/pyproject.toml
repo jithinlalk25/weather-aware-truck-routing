@@ -1,0 +1,41 @@
+[project]
+name = "truck-routing-backend"
+version = "0.1.0"
+description = "Weather-aware truck routing API (Django + DRF)"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=5.2,<6",
+    "djangorestframework>=3.16",
+    "django-cors-headers>=4.7",
+    "dj-database-url>=3.0",
+    "psycopg[binary]>=3.2",
+    "gunicorn>=23",
+    "whitenoise>=6.9",
+    "httpx>=0.28",
+    "timezonefinder>=6.5",
+    "python-dotenv>=1.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-django>=4.11",
+    "respx>=0.22",
+    "ruff>=0.12",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "DJ"]
