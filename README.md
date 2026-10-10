@@ -180,7 +180,6 @@ pnpm lint
 - Pre-deploy command: `python manage.py migrate --noinput && python manage.py createcachetable`
 - Start command: `python manage.py collectstatic --noinput && gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 --access-logfile -`
 - Healthcheck path `/api/health`.
-- App sleeping is on for the backend and Postgres to keep costs low, so the first request after about 10 idle minutes takes a few extra seconds.
 - Required variables:
   - `SECRET_KEY`
   - `DEBUG=0`
