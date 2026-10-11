@@ -4,7 +4,7 @@ A React + Django app that helps a truck driver pick the safest route. It generat
 
 - **Live app:** https://truck-weather.vercel.app
 - **API:** https://backend-production-4052b.up.railway.app/api/health
-- **Walkthrough (Loom):** _TBD_
+- **Walkthrough (Loom):** https://www.loom.com/share/72e30b98cc9f4f20a92310a6f7f2c2c2
 
 ## Features
 
